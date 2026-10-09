@@ -12,81 +12,157 @@ st.set_page_config(
     layout="wide"
 )
 
-ARCHIVO_DATOS = "gastos.csv"
+ARCHIVO_GASTOS = "gastos.csv"
+ARCHIVO_USUARIOS = "usuarios.csv"
 
 # -------------------------------------------------------------
-# Funciones de Seguridad y Manejo de Datos
+# Funciones de Manejo de Usuarios y Seguridad
 # -------------------------------------------------------------
 def encriptar_clave(password):
     """Convierte la contraseña en un hash seguro encriptado."""
-    return hashlib.sha256(password.encode()).hexdigest()
+    return hashlib.sha256(str(password).encode()).hexdigest()
 
-# Usuarios registrados (Usuario: Contraseña encriptada)
-# Usuarios registrados (Usuario: Contraseña encriptada)
-USUARIOS = {
-    "admin": encriptar_clave("1234"),
-    "usuario1": encriptar_clave("mi_clave_123"),
-    "carlos": encriptar_clave("mi_clave_secreta_2026")  # <-- Puedes agregar nuevos así
-}
+def cargar_usuarios():
+    """Carga los usuarios registrados desde el archivo CSV."""
+    if os.path.exists(ARCHIVO_USUARIOS):
+        df = pd.read_csv(ARCHIVO_USUARIOS, dtype={"Usuario": str})
+        return df
+    else:
+        # Crear usuario por defecto la primera vez
+        df_inicial = pd.DataFrame([
+            {"Usuario": "12345", "Clave_Hash": encriptar_clave("1234"), "Nombre": "Administrador", "Correo": "admin@mail.com", "Telefono": ""}
+        ])
+        df_inicial.to_csv(ARCHIVO_USUARIOS, index=False)
+        return df_inicial
 
-def cargar_datos():
-    if os.path.exists(ARCHIVO_DATOS):
-        df = pd.read_csv(ARCHIVO_DATOS)
-        df["Fecha"] = pd.to_datetime(df["Fecha"]).dt.date
+def guardar_usuario(usuario, clave, nombre, correo, telefono):
+    """Guarda un nuevo usuario en el archivo CSV."""
+    df_users = cargar_usuarios()
+    nuevo_user = pd.DataFrame([{
+        "Usuario": str(usuario).strip(),
+        "Clave_Hash": encriptar_clave(clave),
+        "Nombre": nombre.strip(),
+        "Correo": correo.strip(),
+        "Telefono": str(telefono).strip()
+    }])
+    df_actualizado = pd.concat([df_users, nuevo_user], ignore_index=True)
+    df_actualizado.to_csv(ARCHIVO_USUARIOS, index=False)
+
+def cargar_gastos():
+    """Carga los gastos registrados desde el archivo CSV."""
+    if os.path.exists(ARCHIVO_GASTOS):
+        df = pd.read_csv(ARCHIVO_GASTOS, dtype={"Usuario": str})
+        if not df.empty and "Fecha" in df.columns:
+            df["Fecha"] = pd.to_datetime(df["Fecha"]).dt.date
         return df
     else:
         return pd.DataFrame(columns=["Usuario", "Fecha", "Concepto", "Categoría", "Monto"])
 
-def guardar_datos(df):
-    df.to_csv(ARCHIVO_DATOS, index=False)
+def guardar_gastos(df):
+    """Guarda la tabla de gastos en el archivo CSV."""
+    df.to_csv(ARCHIVO_GASTOS, index=False)
 
 # -------------------------------------------------------------
-# Control de Sesión (Login)
+# Control de Sesión (Login y Registro)
 # -------------------------------------------------------------
 if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
 if "usuario_actual" not in st.session_state:
     st.session_state.usuario_actual = ""
+if "nombre_actual" not in st.session_state:
+    st.session_state.nombre_actual = ""
 
 if not st.session_state.autenticado:
-    st.title("🔒 Iniciar Sesión")
+    st.title("🔐 Acceso al Sistema de Gastos")
     
-    with st.form("form_login"):
-        user_input = st.text_input("Usuario")
-        pass_input = st.text_input("Contraseña", type="password")
-        btn_login = st.form_submit_button("Ingresar")
-        
-        if btn_login:
-            if user_input in USUARIOS and USUARIOS[user_input] == encriptar_clave(pass_input):
-                st.session_state.autenticado = True
-                st.session_state.usuario_actual = user_input
-                st.success(f"Bienvenido, {user_input}!")
-                st.rerun()
-            else:
-                st.error("Usuario o contraseña incorrectos")
+    tab_login, tab_registro = st.tabs(["🔑 Iniciar Sesión", "📝 Registrar Nueva Cuenta"])
+    
+    # ---------------------------------------------------------
+    # TAB 1: INICIAR SESIÓN
+    # ---------------------------------------------------------
+    with tab_login:
+        with st.form("form_login"):
+            user_input = st.text_input("Usuario o ID (pueden ser números)", help="Ejemplo: 12345 o tu documento")
+            pass_input = st.text_input("Contraseña", type="password")
+            btn_login = st.form_submit_button("Ingresar")
+            
+            if btn_login:
+                user_clean = str(user_input).strip()
+                pass_clean = str(pass_input).strip()
+                
+                if not user_clean or not pass_clean:
+                    st.error("Por favor completa el usuario y la contraseña.")
+                else:
+                    df_users = cargar_usuarios()
+                    user_match = df_users[df_users["Usuario"] == user_clean]
+                    
+                    if not user_match.empty:
+                        hash_guardado = user_match.iloc[0]["Clave_Hash"]
+                        if hash_guardado == encriptar_clave(pass_clean):
+                            st.session_state.autenticado = True
+                            st.session_state.usuario_actual = user_clean
+                            st.session_state.nombre_actual = user_match.iloc[0]["Nombre"] if pd.notna(user_match.iloc[0]["Nombre"]) and user_match.iloc[0]["Nombre"] != "" else user_clean
+                            st.success(f"¡Bienvenido/a, {st.session_state.nombre_actual}!")
+                            st.rerun()
+                        else:
+                            st.error("Contraseña incorrecta.")
+                    else:
+                        st.error("El usuario ingresado no existe. Regístrate en la pestaña adyacente.")
+
+    # ---------------------------------------------------------
+    # TAB 2: REGISTRARSE
+    # ---------------------------------------------------------
+    with tab_registro:
+        st.subheader("Crea tu cuenta de usuario")
+        with st.form("form_registro", clear_on_submit=True):
+            reg_usuario = st.text_input("Usuario o N° de Identificación (Obligatorio)*", help="Puedes usar un número como tu cédula o ID")
+            reg_clave = st.text_input("Contraseña (Obligatorio)*", type="password")
+            
+            st.markdown("---")
+            st.caption("📌 **Campos Opcionales:**")
+            reg_nombre = st.text_input("Nombre y Apellido (Opcional)")
+            reg_correo = st.text_input("Correo electrónico (Opcional)")
+            reg_telefono = st.text_input("Número de Teléfono (Opcional)")
+            
+            btn_registro = st.form_submit_button("Crear Cuenta")
+            
+            if btn_registro:
+                user_clean = str(reg_usuario).strip()
+                clave_clean = str(reg_clave).strip()
+                
+                if not user_clean or not clave_clean:
+                    st.error("El Usuario y la Contraseña son obligatorios.")
+                else:
+                    df_users = cargar_usuarios()
+                    if user_clean in df_users["Usuario"].values:
+                        st.error("Este usuario o ID ya se encuentra registrado. Intenta con otro o inicia sesión.")
+                    else:
+                        guardar_usuario(user_clean, clave_clean, reg_nombre, reg_correo, reg_telefono)
+                        st.success("🎉 ¡Cuenta creada con éxito! Ahora puedes iniciar sesión desde la pestaña 'Iniciar Sesión'.")
+
 else:
     # -------------------------------------------------------------
-    # Panel Principal (Usuario Autenticado)
+    # PANEL PRINCIPAL (USUARIO CONECTADO)
     # -------------------------------------------------------------
-    # Botón de Salir (Logout)
     col_titulo, col_logout = st.columns([4, 1])
     with col_titulo:
-        st.title(f"💰 Control de Gastos — ({st.session_state.usuario_actual})")
+        st.title(f"💰 Control de Gastos — {st.session_state.nombre_actual}")
+        st.caption(f"ID Usuario: `{st.session_state.usuario_actual}`")
     with col_logout:
         if st.button("🔴 Cerrar Sesión"):
             st.session_state.autenticado = False
             st.session_state.usuario_actual = ""
+            st.session_state.nombre_actual = ""
             st.rerun()
 
     st.markdown("---")
 
-    # Cargar todos los datos y filtrar por el usuario actual
-    df_todos = cargar_datos()
-    df_usuario = df_todos[df_todos["Usuario"] == st.session_state.usuario_actual]
+    df_todos = cargar_gastos()
+    df_usuario = df_todos[df_todos["Usuario"] == str(st.session_state.usuario_actual)]
 
     col_form, col_reporte = st.columns([1, 2])
 
-    # FORMULARIO DE REGISTRO
+    # FORMULARIO DE REGISTRO DE GASTOS
     with col_form:
         st.header("➕ Registrar Nuevo Gasto")
         
@@ -106,7 +182,7 @@ else:
                     st.error("El monto debe ser mayor a 0.")
                 else:
                     nuevo_gasto = pd.DataFrame([[
-                        st.session_state.usuario_actual, 
+                        str(st.session_state.usuario_actual), 
                         fecha, 
                         concepto, 
                         categoria, 
@@ -114,16 +190,16 @@ else:
                     ]], columns=df_todos.columns)
                     
                     df_actualizado = pd.concat([df_todos, nuevo_gasto], ignore_index=True)
-                    guardar_datos(df_actualizado)
+                    guardar_gastos(df_actualizado)
                     st.success("✅ Gasto guardado exitosamente")
                     st.rerun()
 
-    # REPORTE Y HISTORIAL (Solo datos del usuario activo)
+    # REPORTE Y HISTORIAL DEL USUARIO
     with col_reporte:
         st.header("📊 Reporte General")
         
         if df_usuario.empty:
-            st.info("Aún no has registrado ningún gasto con este usuario.")
+            st.info("Aún no has registrado ningún gasto en esta cuenta.")
         else:
             total_gastado = df_usuario["Monto"].sum()
             total_registros = len(df_usuario)
