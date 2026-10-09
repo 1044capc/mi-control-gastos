@@ -1,106 +1,143 @@
 import streamlit as st
 import pandas as pd
+import hashlib
 import os
 
-# Configuración de la página (Título de la pestaña e icono)
+# -------------------------------------------------------------
+# Configuración inicial de la página
+# -------------------------------------------------------------
 st.set_page_config(
-    page_title="Gestor de Gastos Personales",
+    page_title="Control de Gastos Personal",
     page_icon="💰",
     layout="wide"
 )
 
-NOMBRE_ARCHIVO = "gastos.csv"
+ARCHIVO_DATOS = "gastos.csv"
 
-# Cargar los datos desde el archivo CSV
+# -------------------------------------------------------------
+# Funciones de Seguridad y Manejo de Datos
+# -------------------------------------------------------------
+def encriptar_clave(password):
+    """Convierte la contraseña en un hash seguro encriptado."""
+    return hashlib.sha256(password.encode()).hexdigest()
+
+# Usuarios registrados (Usuario: Contraseña encriptada)
+# Puedes agregar más usuarios a este diccionario
+USUARIOS = {
+    "admin": encriptar_clave("1234"),
+    "usuario1": encriptar_clave("mi_clave_123")
+}
+
 def cargar_datos():
-    if os.path.exists(NOMBRE_ARCHIVO):
-        datos = pd.read_csv(NOMBRE_ARCHIVO)
-        datos["Fecha"] = pd.to_datetime(datos["Fecha"]).dt.date
-        return datos
+    if os.path.exists(ARCHIVO_DATOS):
+        df = pd.read_csv(ARCHIVO_DATOS)
+        df["Fecha"] = pd.to_datetime(df["Fecha"]).dt.date
+        return df
     else:
-        return pd.DataFrame(columns=["Fecha", "Descripción", "Categoría", "Monto"])
+        return pd.DataFrame(columns=["Usuario", "Fecha", "Concepto", "Categoría", "Monto"])
 
-# Guardar los datos en el archivo CSV
-def guardar_datos(datos):
-    datos.to_csv(NOMBRE_ARCHIVO, index=False)
+def guardar_datos(df):
+    df.to_csv(ARCHIVO_DATOS, index=False)
 
-# Cargar la información al iniciar
-df_gastos = cargar_datos()
+# -------------------------------------------------------------
+# Control de Sesión (Login)
+# -------------------------------------------------------------
+if "autenticado" not in st.session_state:
+    st.session_state.autenticado = False
+if "usuario_actual" not in st.session_state:
+    st.session_state.usuario_actual = ""
 
-# Encabezado principal
-st.title("💰 Mis Gastos Mensuales")
-st.caption("App para controlar tus gastos mensuales")
-st.markdown("---")
-
-# Layout de dos columnas
-col_formulario, col_reporte = st.columns([1, 2])
-
-# =============================================================
-# COLUMNA 1: Formulario para ingresar gastos
-# =============================================================
-with col_formulario:
-    st.header("➕ Registrar Nuevo Gasto")
+if not st.session_state.autenticado:
+    st.title("🔒 Iniciar Sesión")
     
-    with st.form("formulario_gastos", clear_on_submit=True):
-        fecha = st.date_input("Fecha del gasto")
-        descripcion = st.text_input("Descripción del gasto", placeholder="Ej. Compras del supermercado")
-        categoria = st.selectbox(
-            "Categoría",
-            [
-                "Alimentación",
-                "Transporte",
-                "Vivienda y Servicios",
-                "Entretenimiento",
-                "Salud y Bienestar",
-                "Educación",
-                "Otros Gastos"
-            ]
-        )
-        monto = st.number_input("Valor del gasto: ($)", min_value=0.0, format="%.2f", step=100.0)
+    with st.form("form_login"):
+        user_input = st.text_input("Usuario")
+        pass_input = st.text_input("Contraseña", type="password")
+        btn_login = st.form_submit_button("Ingresar")
         
-        boton_guardar = st.form_submit_button("💾 Guardar Gasto")
-        
-        if boton_guardar:
-            if descripcion.strip() == "":
-                st.error("Por favor, escribe una descripción para el gasto.")
-            elif monto <= 0:
-                st.error("El monto ingresado debe ser mayor a cero.")
-            else:
-                nuevo_registro = pd.DataFrame(
-                    [[fecha, descripcion, categoria, monto]], 
-                    columns=df_gastos.columns
-                )
-                df_gastos = pd.concat([df_gastos, nuevo_registro], ignore_index=True)
-                guardar_datos(df_gastos)
-                st.success("✅ ¡Gasto registrado exitosamente!")
+        if btn_login:
+            if user_input in USUARIOS and USUARIOS[user_input] == encriptar_clave(pass_input):
+                st.session_state.autenticado = True
+                st.session_state.usuario_actual = user_input
+                st.success(f"Bienvenido, {user_input}!")
                 st.rerun()
+            else:
+                st.error("Usuario o contraseña incorrectos")
+else:
+    # -------------------------------------------------------------
+    # Panel Principal (Usuario Autenticado)
+    # -------------------------------------------------------------
+    # Botón de Salir (Logout)
+    col_titulo, col_logout = st.columns([4, 1])
+    with col_titulo:
+        st.title(f"💰 Control de Gastos — ({st.session_state.usuario_actual})")
+    with col_logout:
+        if st.button("🔴 Cerrar Sesión"):
+            st.session_state.autenticado = False
+            st.session_state.usuario_actual = ""
+            st.rerun()
 
-# =============================================================
-# COLUMNA 2: Reporte General e Historial
-# =============================================================
-with col_reporte:
-    st.header("📊 Resumen y Reporte General")
-    
-    if df_gastos.empty:
-        st.info("Aún no tienes gastos registrados. Utiliza el formulario de la izquierda para agregar tu primer gasto.")
-    else:
-        # Métricas resumidas
-        total_acumulado = df_gastos["Monto"].sum()
-        total_movimientos = len(df_gastos)
-        promedio_por_gasto = df_gastos["Monto"].mean()
+    st.markdown("---")
+
+    # Cargar todos los datos y filtrar por el usuario actual
+    df_todos = cargar_datos()
+    df_usuario = df_todos[df_todos["Usuario"] == st.session_state.usuario_actual]
+
+    col_form, col_reporte = st.columns([1, 2])
+
+    # FORMULARIO DE REGISTRO
+    with col_form:
+        st.header("➕ Registrar Nuevo Gasto")
         
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Total Gastado", f"${total_acumulado:,.2f}")
-        m2.metric("Promedio por Registro", f"${promedio_por_gasto:,.2f}")
-        m3.metric("N° de Gastos", total_movimientos)
+        with st.form("formulario_gasto", clear_on_submit=True):
+            fecha = st.date_input("Fecha")
+            concepto = st.text_input("Concepto / Descripción")
+            categoria = st.selectbox(
+                "Categoría",
+                ["Comida", "Transporte", "Servicios", "Entretenimiento", "Salud", "Educación", "Otros"]
+            )
+            monto = st.number_input("Monto ($)", min_value=0.0, format="%.2f", step=1.0)
+            
+            if st.form_submit_button("Guardar Gasto"):
+                if concepto.strip() == "":
+                    st.error("Por favor ingresa un concepto.")
+                elif monto <= 0:
+                    st.error("El monto debe ser mayor a 0.")
+                else:
+                    nuevo_gasto = pd.DataFrame([[
+                        st.session_state.usuario_actual, 
+                        fecha, 
+                        concepto, 
+                        categoria, 
+                        monto
+                    ]], columns=df_todos.columns)
+                    
+                    df_actualizado = pd.concat([df_todos, nuevo_gasto], ignore_index=True)
+                    guardar_datos(df_actualizado)
+                    st.success("✅ Gasto guardado exitosamente")
+                    st.rerun()
+
+    # REPORTE Y HISTORIAL (Solo datos del usuario activo)
+    with col_reporte:
+        st.header("📊 Reporte General")
         
-        st.markdown("---")
-        
-        # Gráfico por Categoría
-        st.subheader("📈 Gastos acumulados por Categoría")
-        gastos_categoria = df_gastos.groupby("Categoría")["Monto"].sum().reset_index()
-        st.bar_chart(data=gastos_categoria, x="Categoría", y="Monto")
-        
-        # Tabla del Historial
-        st.subheader("📋 Historial Completo de Movimientos")
-        st.dataframe(df_gastos, use_container_width=True)
+        if df_usuario.empty:
+            st.info("Aún no has registrado ningún gasto con este usuario.")
+        else:
+            total_gastado = df_usuario["Monto"].sum()
+            total_registros = len(df_usuario)
+            promedio_gasto = df_usuario["Monto"].mean()
+            
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Total Gastado", f"${total_gastado:,.2f}")
+            m2.metric("Promedio por Gasto", f"${promedio_gasto:,.2f}")
+            m3.metric("Total Registros", total_registros)
+            
+            st.markdown("---")
+            
+            st.subheader("📈 Gastos por Categoría")
+            gastos_cat = df_usuario.groupby("Categoría")["Monto"].sum().reset_index()
+            st.bar_chart(data=gastos_cat, x="Categoría", y="Monto")
+            
+            st.subheader("📋 Tu Historial")
+            st.dataframe(df_usuario[["Fecha", "Concepto", "Categoría", "Monto"]], use_container_width=True)
