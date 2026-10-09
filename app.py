@@ -22,10 +22,11 @@ def encriptar_clave(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
 # Usuarios registrados (Usuario: Contraseña encriptada)
-# Puedes agregar más usuarios a este diccionario
+# Usuarios registrados (Usuario: Contraseña encriptada)
 USUARIOS = {
     "admin": encriptar_clave("1234"),
-    "usuario1": encriptar_clave("mi_clave_123")
+    "usuario1": encriptar_clave("mi_clave_123"),
+    "carlos": encriptar_clave("mi_clave_secreta_2026")  # <-- Puedes agregar nuevos así
 }
 
 def cargar_datos():
